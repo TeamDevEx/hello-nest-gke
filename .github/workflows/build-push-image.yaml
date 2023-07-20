@@ -1,0 +1,62 @@
+# Push Image to Artifact Registry
+name: Build NodeJS Image
+on:
+  push:
+    branches: 
+      - main
+  workflow_dispatch:
+
+env:
+  # Your Google Cloud Non-Prod Project
+  PROJECT_ID: off-net-dev
+
+  # The Google Cloud Region where you want to deploy; you likely don't have to change this
+  REGION: northamerica-northeast1
+
+jobs:
+  cloud-deploy-np:
+    name: Cloud Deploy NP
+    runs-on: [ubuntu-latest]
+    concurrency:
+      group: dev
+      cancel-in-progress: false
+    permissions:
+      contents: "read"
+      pull-requests: "write"
+      id-token: "write"
+    steps:
+      # Check out your GitHub repo into the container executing these steps
+      - name: "Cloning repo"
+        uses: actions/checkout@v3
+
+      # Authenticate to the Google Cloud platform using Workload Identity Federation, the most secure and preferred
+      # way to connect to our Google Cloud Platform from GitHub.
+      # The workload_identity_provider is managed for the entire cluster and you don't need to worry about it.
+      # The service_account must be setup within your Google Project. This is done by the Cloud CoE as part of
+      # project onboarding, so you don't need to worry about it beyond enabling GitHub actions as part of your
+      # Google Cloud project onboarding request.
+      - id: auth
+        name: Authenticate to Google using WIF
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: "projects/541105984323/locations/global/workloadIdentityPools/off-net-dev-wif/providers/github-teamdevex"
+          service_account: "github-wif-test@off-net-dev.iam.gserviceaccount.com"
+          token_format: "access_token"
+
+      # The GCloud CLI must be installed and configured in the container to enable subsequent steps
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v0
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          
+
+      # Configure docker authorization for access to the Google Artifact Registry
+      - name: Configure Docker
+        run: |-
+          gcloud --quiet auth configure-docker northamerica-northeast1-docker.pkg.dev
+
+      # Set up Cloud Deploy in your project following the definition in your clouddeploy.yaml file
+      - name: Build Image
+        run: |-           
+          docker build . -t northamerica-northeast1-docker.pkg.dev/off-net-dev/hello-nest-gke/hello-nest-gke:latest
+          docker push northamerica-northeast1-docker.pkg.dev/off-net-dev/hello-nest-gke/hello-nest-gke:latest
